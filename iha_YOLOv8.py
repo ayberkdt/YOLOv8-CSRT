@@ -5,7 +5,7 @@ from ultralytics.utils.plotting import Annotator
 
 
 tracker_types = ['BOOSTING', 'MIL', 'KCF', 'TLD', 'MEDIANFLOW', 'MOSSE', 'CSRT']
-tracker_type = tracker_types[3]
+tracker_type = tracker_types[6]
 
 if tracker_type == 'BOOSTING':
     tracker = cv2.legacy.TrackerBoosting.create()
@@ -37,17 +37,23 @@ output = cv2.VideoWriter(f'{tracker_type}.avi',
 # bbox = 200,200,100,100 #Just the test if bbox properly created
 bbox = 1,1,10,10
 last = bbox
-# ret = tracker.init(frame, bbox)
+ret = tracker.init(frame, bbox)
 bbox = None
 tracking = False
 while True:
     ret, frame =video.read()
     img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = model.predict(img)
+    ret, bbox = tracker.update(frame)
     for r in results:
 
         annotator = Annotator(frame)
-
+        # print(r.boxes.xyxy)  # box with xyxy format, (N, 4)
+        # r.boxes.xyxyn  # box with xyxy format but normalized, (N, 4)
+        # r.boxes.xywhn  # box with xywh format but normalized, (N, 4)
+        # r.boxes.conf  # confidence score, (N, 1)
+        # r.boxes.cls  # cls, (N, 1)
+        # print((r.boxes.xywh))  # box with xywh format, (N, 4)
         empty_tensor = torch.empty(0, 4)
         tensor_values = (r.boxes.xywh).clone().detach()
 
@@ -55,20 +61,19 @@ while True:
             cv2.putText(frame, "YOLO : OFF", (20, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
             if tracking:
-                tracker.init(frame,last)
                 # Update the tracker to get the new bounding box position
                 success, bbox = tracker.update(frame)
 
                 if success:
                     # Draw the bounding box on the frame
-                    x, y, w, h = [int(i) for i in last]
+                    x, y, w, h = [int(i) for i in bbox]
                     cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 else:
                     tracking = False
 
             if bbox is not None:
                 # Draw the last known bounding box (if available)
-                x, y, w, h = [int(i) for i in last]
+                x, y, w, h = [int(i) for i in bbox]
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
                 # Display the frame
@@ -80,9 +85,9 @@ while True:
             tracker.init(frame, last)
             tracking = True
 
+
+
         else:
-            tracker = None
-            bbox = None
             cv2.putText(frame, "YOLO : ON", (20, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
             bb_x = int(tensor_values[0, 0])
