@@ -4,119 +4,52 @@ import cv2
 from ultralytics.utils.plotting import Annotator
 
 
-tracker_types = ['BOOSTING', 'MIL', 'KCF', 'TLD', 'MEDIANFLOW', 'MOSSE', 'CSRT']
-tracker_type = tracker_types[6]
 
-if tracker_type == 'BOOSTING':
-    tracker = cv2.legacy.TrackerBoosting.create()
-if tracker_type == 'MIL':
-    tracker = cv2.legacy.TrackerMIL.create()
-if tracker_type == 'KCF' :
-    tracker = cv2.legacy.TrackerKCF.create()
-if tracker_type == 'TLD' :
-    tracker = cv2.legacy.TrackerTLD.create()
-if tracker_type == 'MEDIANFLOW' :
-    tracker = cv2.legacy.TrackerMedianFlow.create()
-if tracker_type == 'MOSSE' :
-    tracker = cv2.legacy.TrackerMOSSE.create()
-if tracker_type == 'CSRT' :
-    tracker = cv2.legacy.TrackerCSRT.create()
+# model = YOLO('yolov8n.pt')  # load an official model
 
 model = YOLO('uav_yolov8.pt')  # load a custom model
 
 
 # Predict with model (videos)
 video_path = "videos_iha/ihavd_base.mp4"
-video = cv2.VideoCapture(video_path)
-ret, frame = video.read()
+cap = cv2.VideoCapture(video_path)
 
-frame_height, frame_width = frame.shape[:2]
-output = cv2.VideoWriter(f'{tracker_type}.avi',
-                         cv2.VideoWriter_fourcc(*'XVID'), 60.0,
-                         (frame_width, frame_height), True)
-# bbox = 200,200,100,100 #Just the test if bbox properly created
-bbox = 1,1,10,10
-last = bbox
-ret = tracker.init(frame, bbox)
-bbox = None
-tracking = False
+ret = True
+last = None
 while True:
-    ret, frame =video.read()
+    ret, frame =cap.read()
+
     img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
     results = model.predict(img)
-    ret, bbox = tracker.update(frame)
-    for r in results:
+    # Extract boxes, scores, and class labels
+    boxes = results[0].boxes.xyxy  # xyxy format
+    scores = results[0].boxes.conf  # confidence scores
+    print(boxes,scores)
+    annotator = Annotator(frame)
+    empty_tensor = torch.empty(0, 4)
+    tensor_values = (results[0].boxes.xyxy).clone().detach()
 
-        annotator = Annotator(frame)
-        # print(r.boxes.xyxy)  # box with xyxy format, (N, 4)
-        # r.boxes.xyxyn  # box with xyxy format but normalized, (N, 4)
-        # r.boxes.xywhn  # box with xywh format but normalized, (N, 4)
-        # r.boxes.conf  # confidence score, (N, 1)
-        # r.boxes.cls  # cls, (N, 1)
-        # print((r.boxes.xywh))  # box with xywh format, (N, 4)
-        empty_tensor = torch.empty(0, 4)
-        tensor_values = (r.boxes.xywh).clone().detach()
+    #If YOLO can detect loop
+    if torch.equal(results[0].boxes.xywh, empty_tensor) == False:
+        has = max(scores)
 
-        if torch.equal(r.boxes.xywh, empty_tensor):
-            cv2.putText(frame, "YOLO : OFF", (20, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
-            if tracking:
-                # Update the tracker to get the new bounding box position
-                success, bbox = tracker.update(frame)
+        for a in range(len(results[0].boxes.conf)):
+            if results[0].boxes.conf[a] == has:
+                last_yolo = [int(i) for i in results[0].boxes.xyxy[a]]
+                last = [int(i) for i in results[0].boxes.xywh[a]]
+                print(last)
 
-                if success:
-                    # Draw the bounding box on the frame
-                    x, y, w, h = [int(i) for i in bbox]
-                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                else:
-                    tracking = False
+            annotator.box_label(last_yolo, "uav")
 
-            if bbox is not None:
-                # Draw the last known bounding box (if available)
-                x, y, w, h = [int(i) for i in bbox]
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-                # Display the frame
-            cv2.imshow("YOLO V8 Detection", frame)
+    #If YOLO cannot detect loop
+    elif torch.equal(results[0].boxes.xywh, empty_tensor) and last != None:
+        print("Tracking") #Tracking başlayacak (last değeri trackerın ilk bboxu olacak)
 
 
-            # Manually adjust the bounding box by selecting a new one
-            tracker = cv2.legacy.TrackerCSRT_create()
-            tracker.init(frame, last)
-            tracking = True
-
-
-
-        else:
-            cv2.putText(frame, "YOLO : ON", (20, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
-            bb_x = int(tensor_values[0, 0])
-            bb_y = int(tensor_values[0, 1])
-            bb_width = int(tensor_values[0, 2])
-            bb_height = int(tensor_values[0, 3])
-
-            bbox = (bb_x, bb_y, bb_width, bb_height)
-            # print(f"Bbox in loop: {bbox}")
-            last = (bb_x, bb_y, bb_width, bb_height)
-
-
-            # print(f"X: {bb_x}")
-            # print(f"Y: {bb_y}")
-            # print(f"Width: {bb_width}")
-            # print(f"Height: {bb_height}")
-
-
-        boxes = r.boxes
-        for box in boxes:
-            b = box.xyxy[0]  # get box coordinates in (top, left, bottom, right) format
-            c = box.cls
-            annotator.box_label(b, model.names[int(c)])
-            # print(b,c)
-
-    frame = annotator.result()
     cv2.imshow('YOLO V8 Detection', frame)
     if cv2.waitKey(1) & 0xFF == ord(' '):
         break
 
-video.release()
+cap.release()
 cv2.destroyAllWindows()
